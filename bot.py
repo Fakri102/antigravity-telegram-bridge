@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Antigravity Telegram Bridge
-Menghubungkan Telegram Chat ke Google Antigravity di Komputer / Desktop Lokal.
+Menghubungkan Telegram Chat & Voice/Audio ke Google Antigravity di Komputer / Desktop Lokal.
 """
 
 import os
 import sys
 import json
+import tempfile
 import asyncio
 import logging
 from typing import Dict, Optional, Set
@@ -20,6 +21,10 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+# Audio libraries
+import speech_recognition as sr
+from pydub import AudioSegment
 
 # Load environment configuration
 load_dotenv()
@@ -39,6 +44,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
 DEFAULT_WORKSPACE = os.getenv("ANTIGRAVITY_WORKSPACE", os.path.expanduser("~"))
 AGY_PATH = os.getenv("AGY_BINARY_PATH", os.path.expanduser("~/.local/bin/agy"))
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 # Parse allowed IDs
 ALLOWED_USER_IDS: Set[int] = set()
@@ -85,7 +91,6 @@ async def send_chunked_message(update: Update, text: str):
             await update.message.reply_text(text)
         return
 
-    # Bagi teks per baris agar tidak memotong kata di tengah
     lines = text.split("\n")
     current_chunk = ""
     for line in lines:
@@ -116,6 +121,70 @@ async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event):
         except asyncio.TimeoutError:
             pass
 
+# Audio Transcription Function
+async def transcribe_audio_file(file_path: str) -> str:
+    """Mengonversi file audio/voice note ke teks menggunakan Gemini atau SpeechRecognition."""
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    # Metode 1: Jika GEMINI_API_KEY ada, gunakan Gemini Multimodal Audio (Sangat Akurat)
+    if gemini_key:
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=gemini_key)
+            with open(file_path, "rb") as f:
+                audio_bytes = f.read()
+
+            ext = os.path.splitext(file_path)[1].lower()
+            mime_type = "audio/ogg" if ext in [".oga", ".ogg"] else "audio/wav"
+
+            prompt_transcribe = (
+                "Transcribe this voice message accurately into text. "
+                "The user is talking in Indonesian or English about coding, tasks, or instructions. "
+                "Output ONLY the transcribed text without quotes, formatting, or extra conversation."
+            )
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                    prompt_transcribe
+                ]
+            )
+            if response.text and response.text.strip():
+                return response.text.strip()
+        except Exception as ge:
+            logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan engine fallback...")
+
+    # Metode 2: Fallback ke SpeechRecognition + Pydub / FFmpeg (Gratis & Cepat)
+    wav_path = file_path + ".wav"
+    try:
+        # Konversi ke WAV mono 16kHz
+        sound = AudioSegment.from_file(file_path)
+        sound = sound.set_channels(1).set_frame_rate(16000)
+        sound.export(wav_path, format="wav")
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(wav_path) as source:
+            recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            audio_data = recognizer.record(source)
+
+        # Coba Bahasa Indonesia terlebih dahulu
+        try:
+            text = recognizer.recognize_google(audio_data, language="id-ID")
+            return text
+        except sr.UnknownValueError:
+            # Fallback ke Bahasa Inggris jika gagal
+            text = recognizer.recognize_google(audio_data, language="en-US")
+            return text
+    finally:
+        if os.path.exists(wav_path):
+            try:
+                os.remove(wav_path)
+            except Exception:
+                pass
+
 # Command Handlers
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -139,13 +208,15 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Halo *{username}*, bot ini terhubung langsung ke Google Antigravity di komputer/desktop Anda.\n\n"
         f"📂 *Workspace Saat Ini:* `{session.workspace_dir}`\n"
         f"🧠 *Model:* `{session.model or 'Default (Antigravity Config)'}`\n\n"
+        f"*Dukungan Input:*\n"
+        f"• 💬 **Teks**: Kirim pesan instruksi biasa.\n"
+        f"• 🎙️ **Voice Note / Audio**: Kirim pesan suara, bot akan otomatis mentranskripsinya & memproses instruksi coding Anda!\n\n"
         f"*Daftar Perintah:*\n"
-        f"• Kirim pesan/instruksi coding langsung ke chat ini.\n"
         f"• `/new` atau `/reset` - Mulai percakapan baru (reset konteks).\n"
         f"• `/workspace <path>` - Lihat atau ubah folder kerja proyek.\n"
         f"• `/status` - Cek status agent, token usage, dan sesi aktif.\n"
-        f"• `/model <nama_model>` - Ganti model AI (contoh: `/model gemini-2.5-pro`).\n"
-        f"• `/effort <low|medium|high>` - Atur kedalaman penalaran (reasoning effort).\n"
+        f"• `/model <nama>` - Ganti model AI (contoh: `/model gemini-2.5-pro`).\n"
+        f"• `/effort <level>` - Atur penalaran (`low`, `medium`, `high`, `default`).\n"
         f"• `/cancel` - Batalkan tugas yang sedang berjalan."
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
@@ -178,6 +249,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• 💬 *Conversation ID:* {conv_display}\n"
         f"• 🧠 *Model:* {model_display}\n"
         f"• ⚡ *Effort:* {effort_display}\n"
+        f"• 🎙️ *Audio Support:* 🟢 Aktif (Voice Note & Audio Files)\n"
         f"• ⚙️ *Binary Path:* `{AGY_PATH}`\n"
         f"• 🟢 *Status:* Siap menerima instruksi."
     )
@@ -209,7 +281,7 @@ async def workspace_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     session.workspace_dir = os.path.abspath(target_dir)
-    session.conversation_id = None  # Reset conversation to start fresh in new workspace
+    session.conversation_id = None
     await update.message.reply_text(
         f"✅ *Workspace berhasil diubah!*\n"
         f"📂 Direktori baru: `{session.workspace_dir}`\n"
@@ -304,7 +376,6 @@ async def execute_antigravity(session: UserSession, prompt: str) -> dict:
 
     cmd.extend(["--print", prompt])
 
-    # Pastikan direktori kerja ada
     cwd = session.workspace_dir if os.path.exists(session.workspace_dir) else os.path.expanduser("~")
 
     logger.info(f"Menjalankan agy di '{cwd}' | Prompt: {prompt[:80]}...")
@@ -325,11 +396,9 @@ async def execute_antigravity(session: UserSession, prompt: str) -> dict:
         raise RuntimeError(f"agy error (code {process.returncode}): {stderr_str or 'Unknown error'}")
 
     try:
-        # Parsing JSON response dari agy
         data = json.loads(stdout_str)
         return data
     except json.JSONDecodeError:
-        # Fallback jika output berupa plain text
         return {
             "response": stdout_str or stderr_str or "(Selesai tanpa output)",
             "status": "SUCCESS" if process.returncode == 0 else "ERROR",
@@ -347,13 +416,11 @@ async def process_prompt_task(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         data = await execute_antigravity(session, prompt)
 
-        # Update conversation_id jika berhasil
         if data.get("conversation_id"):
             session.conversation_id = data["conversation_id"]
 
         response_text = data.get("response", "").strip()
 
-        # Tambahkan informasi durasi jika ada
         duration = data.get("duration_seconds")
         usage = data.get("usage")
         footer_parts = []
@@ -391,12 +458,67 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     session = get_session(user_id)
 
-    # Jika sedang ada tugas berjalan, beri tahu user
     if session.current_task and not session.current_task.done():
         await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan `/cancel` jika ingin membatalkannya.")
         return
 
     session.current_task = asyncio.create_task(process_prompt_task(update, context, prompt))
+
+async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menangani pesan suara (Voice Note) dan file audio."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await update.message.reply_text(f"⛔ Akses ditolak. User ID Anda: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    session = get_session(user_id)
+    if session.current_task and not session.current_task.done():
+        await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan `/cancel` jika ingin membatalkannya.")
+        return
+
+    # Kirim status 'recording voice' / 'typing'
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+
+    # Ambil file audio / voice
+    audio_obj = update.message.voice or update.message.audio
+    if not audio_obj:
+        return
+
+    # Tentukan ekstensi file
+    file_ext = ".oga" if update.message.voice else ".mp3"
+    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp_file:
+        tmp_path = tmp_file.name
+
+    try:
+        # Download audio dari Telegram
+        telegram_file = await context.bot.get_file(audio_obj.file_id)
+        await telegram_file.download_to_drive(custom_path=tmp_path)
+
+        logger.info(f"Mengonversi audio dari user {user_id} ({os.path.getsize(tmp_path)} bytes)...")
+        transcribed_text = await transcribe_audio_file(tmp_path)
+
+        if not transcribed_text or not transcribed_text.strip():
+            await update.message.reply_text("❓ Tidak dapat mendeteksi suara yang jelas dari audio Anda. Silakan coba lagi atau gunakan teks.")
+            return
+
+        # Tampilkan hasil transkripsi ke user
+        await update.message.reply_text(
+            f"🎙️ *Pesan Suara Terdeteksi:*\n_{transcribed_text}_",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # Proses teks hasil transkripsi ke Antigravity
+        session.current_task = asyncio.create_task(process_prompt_task(update, context, transcribed_text))
+
+    except Exception as e:
+        logger.error(f"Error memproses audio: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ Gagal memproses audio:\n`{str(e)}`", parse_mode=ParseMode.MARKDOWN)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 def main():
     if not os.path.exists(AGY_PATH):
@@ -413,7 +535,7 @@ def main():
         print("⚠️ PERINGATAN: ALLOWED_TELEGRAM_USER_ID belum diisi di .env.")
         print("Bot akan menolak semua pesan hingga Anda menambahkan ID Anda.")
 
-    logger.info("Memulai Antigravity Telegram Bridge...")
+    logger.info("Memulai Antigravity Telegram Bridge dengan Audio Support...")
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Daftarkan Handlers
@@ -426,11 +548,16 @@ def main():
     application.add_handler(CommandHandler("model", model_handler))
     application.add_handler(CommandHandler("effort", effort_handler))
     application.add_handler(CommandHandler("cancel", cancel_handler))
+    
+    # Handler Pesan Teks
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    print(f"🤖 Antigravity Telegram Bridge aktif!")
+    # Handler Pesan Suara & File Audio
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_audio_handler))
+
+    print(f"🤖 Antigravity Telegram Bridge aktif! (Voice & Text Ready)")
     print(f"📂 Default Workspace: {DEFAULT_WORKSPACE}")
-    print(f"🔑 Allowed User IDs: {list(ALLOWED_USER_IDS) if ALLOWED_USER_IDS else 'Belum ada (Kirim /start ke bot untuk cek ID Anda)'}")
+    print(f"🔑 Allowed User IDs: {list(ALLOWED_USER_IDS) if ALLOWED_USER_IDS else 'Belum ada'}")
     print("Tekan Ctrl+C untuk menghentikan.")
 
     application.run_polling()
