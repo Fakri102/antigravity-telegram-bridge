@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Antigravity Telegram Bridge
-Menghubungkan Telegram Chat & Voice/Audio ke Google Antigravity di Komputer / Desktop Lokal.
+Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Komputer / Desktop Lokal.
 """
 
 import os
 import sys
 import json
+import time
 import tempfile
 import asyncio
 import logging
@@ -126,7 +127,6 @@ async def transcribe_audio_file(file_path: str) -> str:
     """Mengonversi file audio/voice note ke teks menggunakan Gemini atau SpeechRecognition."""
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
 
-    # Metode 1: Jika GEMINI_API_KEY ada, gunakan Gemini Multimodal Audio (Sangat Akurat)
     if gemini_key:
         try:
             from google import genai
@@ -157,10 +157,8 @@ async def transcribe_audio_file(file_path: str) -> str:
         except Exception as ge:
             logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan engine fallback...")
 
-    # Metode 2: Fallback ke SpeechRecognition + Pydub / FFmpeg (Gratis & Cepat)
     wav_path = file_path + ".wav"
     try:
-        # Konversi ke WAV mono 16kHz
         sound = AudioSegment.from_file(file_path)
         sound = sound.set_channels(1).set_frame_rate(16000)
         sound.export(wav_path, format="wav")
@@ -170,12 +168,10 @@ async def transcribe_audio_file(file_path: str) -> str:
             recognizer.adjust_for_ambient_noise(source, duration=0.3)
             audio_data = recognizer.record(source)
 
-        # Coba Bahasa Indonesia terlebih dahulu
         try:
             text = recognizer.recognize_google(audio_data, language="id-ID")
             return text
         except sr.UnknownValueError:
-            # Fallback ke Bahasa Inggris jika gagal
             text = recognizer.recognize_google(audio_data, language="en-US")
             return text
     finally:
@@ -208,9 +204,10 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Halo *{username}*, bot ini terhubung langsung ke Google Antigravity di komputer/desktop Anda.\n\n"
         f"📂 *Workspace Saat Ini:* `{session.workspace_dir}`\n"
         f"🧠 *Model:* `{session.model or 'Default (Antigravity Config)'}`\n\n"
-        f"*Dukungan Input:*\n"
-        f"• 💬 **Teks**: Kirim pesan instruksi biasa.\n"
-        f"• 🎙️ **Voice Note / Audio**: Kirim pesan suara, bot akan otomatis mentranskripsinya & memproses instruksi coding Anda!\n\n"
+        f"*Dukungan Input Lengkap:*\n"
+        f"• 💬 **Teks**: Kirim instruksi coding atau pertanyaan.\n"
+        f"• 🎙️ **Voice Note / Audio**: Kirim pesan suara, otomatis ditranskripsi & diproses.\n"
+        f"• 🖼️ **Gambar / Screenshot**: Kirim screenshot UI/error beserta caption instruksi.\n\n"
         f"*Daftar Perintah:*\n"
         f"• `/new` atau `/reset` - Mulai percakapan baru (reset konteks).\n"
         f"• `/workspace <path>` - Lihat atau ubah folder kerja proyek.\n"
@@ -250,6 +247,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• 🧠 *Model:* {model_display}\n"
         f"• ⚡ *Effort:* {effort_display}\n"
         f"• 🎙️ *Audio Support:* 🟢 Aktif (Voice Note & Audio Files)\n"
+        f"• 🖼️ *Image Support:* 🟢 Aktif (Photo & Screenshot Uploads)\n"
         f"• ⚙️ *Binary Path:* `{AGY_PATH}`\n"
         f"• 🟢 *Status:* Siap menerima instruksi."
     )
@@ -476,21 +474,17 @@ async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan `/cancel` jika ingin membatalkannya.")
         return
 
-    # Kirim status 'recording voice' / 'typing'
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
-    # Ambil file audio / voice
     audio_obj = update.message.voice or update.message.audio
     if not audio_obj:
         return
 
-    # Tentukan ekstensi file
     file_ext = ".oga" if update.message.voice else ".mp3"
     with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp_file:
         tmp_path = tmp_file.name
 
     try:
-        # Download audio dari Telegram
         telegram_file = await context.bot.get_file(audio_obj.file_id)
         await telegram_file.download_to_drive(custom_path=tmp_path)
 
@@ -501,13 +495,11 @@ async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("❓ Tidak dapat mendeteksi suara yang jelas dari audio Anda. Silakan coba lagi atau gunakan teks.")
             return
 
-        # Tampilkan hasil transkripsi ke user
         await update.message.reply_text(
             f"🎙️ *Pesan Suara Terdeteksi:*\n_{transcribed_text}_",
             parse_mode=ParseMode.MARKDOWN
         )
 
-        # Proses teks hasil transkripsi ke Antigravity
         session.current_task = asyncio.create_task(process_prompt_task(update, context, transcribed_text))
 
     except Exception as e:
@@ -519,6 +511,69 @@ async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+async def photo_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menangani kiriman foto, screenshot, dan dokumen gambar dari Telegram."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await update.message.reply_text(f"⛔ Akses ditolak. User ID Anda: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    session = get_session(user_id)
+    if session.current_task and not session.current_task.done():
+        await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan `/cancel` jika ingin membatalkannya.")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+
+    # Buat folder uploads di dalam workspace aktif
+    uploads_dir = os.path.join(session.workspace_dir, "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+
+    # Dapatkan file gambar (pilih resolusi tertinggi jika berupa PhotoSize)
+    if update.message.photo:
+        file_obj = update.message.photo[-1]
+        file_name = f"image_{int(time.time())}.png"
+    elif update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/"):
+        file_obj = update.message.document
+        orig_name = update.message.document.file_name or "image.png"
+        file_name = f"{int(time.time())}_{orig_name}"
+    else:
+        await update.message.reply_text("❌ Format file bukan gambar yang didukung.")
+        return
+
+    save_path = os.path.join(uploads_dir, file_name)
+
+    try:
+        telegram_file = await context.bot.get_file(file_obj.file_id)
+        await telegram_file.download_to_drive(custom_path=save_path)
+        logger.info(f"Gambar disimpan ke: {save_path} ({os.path.getsize(save_path)} bytes)")
+
+        caption = (update.message.caption or "").strip()
+        if not caption:
+            caption = "Analisis gambar ini dan bantu saya mengimplementasikan atau memeriksa kodenya."
+
+        # Beri info ke user bahwa gambar diterima
+        rel_path = os.path.relpath(save_path, session.workspace_dir)
+        await update.message.reply_text(
+            f"🖼️ *Gambar Diterima!*\n"
+            f"📁 Disimpan di: `{rel_path}`\n"
+            f"📝 Instruksi: _{caption}_",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # Buat prompt yang menyertakan path gambar absolut dan instruksi user
+        image_prompt = (
+            f"User mengunggah sebuah gambar/screenshot yang tersimpan di path: `{save_path}`.\n"
+            f"Gunakan tool 'view_file' untuk melihat dan menganalisis gambar tersebut.\n\n"
+            f"Instruksi User: {caption}"
+        )
+
+        session.current_task = asyncio.create_task(process_prompt_task(update, context, image_prompt))
+
+    except Exception as e:
+        logger.error(f"Error memproses gambar: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ Gagal mengunduh gambar:\n`{str(e)}`", parse_mode=ParseMode.MARKDOWN)
 
 def main():
     if not os.path.exists(AGY_PATH):
@@ -535,7 +590,7 @@ def main():
         print("⚠️ PERINGATAN: ALLOWED_TELEGRAM_USER_ID belum diisi di .env.")
         print("Bot akan menolak semua pesan hingga Anda menambahkan ID Anda.")
 
-    logger.info("Memulai Antigravity Telegram Bridge dengan Audio Support...")
+    logger.info("Memulai Antigravity Telegram Bridge dengan Voice & Image Support...")
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Daftarkan Handlers
@@ -555,7 +610,11 @@ def main():
     # Handler Pesan Suara & File Audio
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_audio_handler))
 
-    print(f"🤖 Antigravity Telegram Bridge aktif! (Voice & Text Ready)")
+    # Handler Foto, Screenshot, dan File Gambar Dokumen
+    application.add_handler(MessageHandler(filters.PHOTO, photo_image_handler))
+    application.add_handler(MessageHandler(filters.Document.IMAGE, photo_image_handler))
+
+    print(f"🤖 Antigravity Telegram Bridge aktif! (Text, Voice & Image Ready)")
     print(f"📂 Default Workspace: {DEFAULT_WORKSPACE}")
     print(f"🔑 Allowed User IDs: {list(ALLOWED_USER_IDS) if ALLOWED_USER_IDS else 'Belum ada'}")
     print("Tekan Ctrl+C untuk menghentikan.")

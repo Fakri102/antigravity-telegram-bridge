@@ -2,9 +2,10 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Multimodal](https://img.shields.io/badge/multimodal-Text%20%7C%20Voice%20%7C%20Images-brightgreen.svg)]()
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
 
-> Kontrol dan berikan instruksi coding ke **Google Antigravity Desktop / CLI (`agy`)** langsung dari aplikasi **Telegram** di smartphone atau perangkat lain di mana pun Anda berada.
+> Kontrol dan berikan instruksi coding ke **Google Antigravity Desktop / CLI (`agy`)** langsung dari aplikasi **Telegram** menggunakan **Teks**, **Pesan Suara (Voice Note)**, maupun **Gambar / Screenshot**.
 
 ---
 
@@ -12,7 +13,7 @@
 
 - [Tentang Proyek](#-tentang-proyek)
 - [Arsitektur](#-arsitektur)
-- [Fitur Utama](#-fitur-utama)
+- [Fitur Multimodal Lengkap](#-fitur-multimodal-lengkap)
 - [Prasyarat](#-prasyarat)
 - [Panduan Instalasi & Penggunaan](#-panduan-instalasi--penggunaan)
   - [1. Clone Repository](#1-clone-repository)
@@ -36,7 +37,8 @@
 
 Dengan aplikasi ini, Anda dapat menjalankan tugas AI agentik di komputer/desktop lokal Anda secara remote melalui Telegram:
 - Membuat, mengedit, atau meninjau kode proyek.
-- Menjalankan analisis dan debugging pada workspace lokal.
+- Mengirimkan rekaman suara (voice note) saat di perjalanan untuk menjalankan tugas coding.
+- Mengirimkan screenshot desain UI atau error log untuk langsung diperbaiki oleh agent.
 - Mengontrol folder proyek aktif secara dinamis.
 - Mengganti model AI atau tingkat penalaran (*reasoning effort*) kapan saja.
 
@@ -45,31 +47,41 @@ Dengan aplikasi ini, Anda dapat menjalankan tugas AI agentik di komputer/desktop
 ## 🏗️ Arsitektur
 
 ```
-┌────────────────────────────────┐
-│   Telegram App (HP / Laptop)   │
-└────────────────────────────────┘
-                ▲
-                │ (Telegram Bot API)
-                ▼
-┌────────────────────────────────┐
-│  Antigravity Telegram Bridge   │
-│     (Python Script / Bot)      │
-└────────────────────────────────┘
-                ▲
-                │ (Subprocess / JSON IPC)
-                ▼
-┌────────────────────────────────┐
-│ Google Antigravity CLI (`agy`) │
-│    & Workspace Proyek Lokal    │
-└────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│          Telegram App (HP / Laptop)          │
+│   [Teks]  •  [Pesan Suara]  •  [Gambar/Foto] │
+└──────────────────────────────────────────────┘
+                       ▲
+                       │ (Telegram Bot API)
+                       ▼
+┌──────────────────────────────────────────────┐
+│         Antigravity Telegram Bridge          │
+│   • Speech Recognition (Audio to Text)       │
+│   • Image Manager (Auto Save to Workspace)   │
+│   • Session & Workspace Controller           │
+└──────────────────────────────────────────────┘
+                       ▲
+                       │ (Subprocess / JSON IPC)
+                       ▼
+┌──────────────────────────────────────────────┐
+│        Google Antigravity CLI (`agy`)        │
+│          & Workspace Proyek Lokal            │
+└──────────────────────────────────────────────┘
 ```
 
 ---
 
-## ✨ Fitur Utama
+## ✨ Fitur Multimodal Lengkap
 
+- 💬 **Input Teks**: Kirim prompt, instruksi coding, atau pertanyaan biasa.
+- 🎙️ **Input Suara (Voice Note & Audio)**:
+  - Kirim Voice Note langsung dari Telegram.
+  - Bot mentranskripsi suara (Bahasa Indonesia & English) dan meneruskannya ke agent Antigravity.
+- 🖼️ **Input Gambar (Foto & Screenshot)**:
+  - Kirim screenshot UI/desain, diagram arsitektur, atau tangkapan layar error.
+  - Bot otomatis menyimpan gambar ke folder `uploads/` di workspace aktif dan memerintahkan agent untuk menganalisisnya.
 - 🧠 **Direct Antigravity Engine**: Langsung memanfaatkan `agy` CLI lokal yang sudah terautentikasi dan memiliki akses ke seluruh tool, skill, dan plugin Antigravity Anda.
-- 💬 **Persistent Multi-turn Conversation**: Mempertahankan memori percakapan (`conversation_id`) antar turn secara otomatis seperti layaknya chatting di aplikasi desktop.
+- 💬 **Persistent Multi-turn Conversation**: Mempertahankan memori percakapan (`conversation_id`) antar turn secara otomatis.
 - 🔒 **Sistem Keamanan Whitelist User ID**: Hanya akun Telegram yang Anda daftarkan di `.env` yang dapat memberikan instruksi ke komputer.
 - 📂 **Manajemen Workspace Dinamis**: Pindah folder kerja proyek kapan saja langsung dari chat menggunakan perintah `/workspace <path>`.
 - ⚡ **Pengaturan Model & Reasoning Effort**: Ubah model atau tingkat kedalaman berpikir AI via `/model` dan `/effort`.
@@ -81,9 +93,11 @@ Dengan aplikasi ini, Anda dapat menjalankan tugas AI agentik di komputer/desktop
 ## 📋 Prasyarat
 
 1. **Python 3.10** atau versi lebih baru.
-2. **Google Antigravity CLI (`agy`)** sudah terinstal dan terautentikasi di komputer Anda.
-   *(Cek via terminal: `agy --version`)*.
-3. Akun **Telegram**.
+2. **FFmpeg** (untuk pemrosesan audio/voice note).
+   - Di macOS: `brew install ffmpeg`
+   - Di Ubuntu/Debian: `sudo apt install ffmpeg`
+3. **Google Antigravity CLI (`agy`)** sudah terinstal dan terautentikasi di komputer Anda.
+4. Akun **Telegram**.
 
 ---
 
@@ -101,10 +115,7 @@ cd antigravity-telegram-bridge
 python3 -m venv venv
 
 # Aktifkan virtual environment
-# Di macOS / Linux:
 source venv/bin/activate
-# Di Windows:
-# .\venv\Scripts\activate
 
 # Instal paket yang dibutuhkan
 pip install -r requirements.txt
@@ -115,7 +126,7 @@ pip install -r requirements.txt
 1. **Buat Bot Telegram**:
    - Buka aplikasi Telegram, cari **[@BotFather](https://t.me/botfather)**.
    - Ketik `/newbot`, lalu ikuti panduan untuk menentukan nama dan username bot.
-   - Simpan **API Token** yang diberikan (contoh: `123456789:ABCdefGhIJK...`).
+   - Simpan **API Token** yang diberikan.
 
 2. **Dapatkan User ID Anda**:
    - Cari **[@userinfobot](https://t.me/userinfobot)** di Telegram.
@@ -140,26 +151,26 @@ ANTIGRAVITY_WORKSPACE=/Users/username/Code
 
 # Path binary agy (default: ~/.local/bin/agy)
 AGY_BINARY_PATH=/Users/username/.local/bin/agy
+
+# Opsional: Gemini API Key untuk transkripsi audio ultra-akurat
+GEMINI_API_KEY=
 ```
 
 ---
 
 ## 🏃 Menjalankan Bot
 
-Pastikan script memiliki izin eksekusi (*executable*):
+Pastikan script memiliki izin eksekusi:
 ```bash
 chmod +x start.sh service.sh bot.py
 ```
 
 ### Opsi A: Menjalankan di Terminal (Interaktif)
-Cocok untuk pengujian awal dan melihat log secara langsung di layar:
 ```bash
 ./start.sh
 ```
 
 ### Opsi B: Menjalankan di Latar Belakang (Background Service)
-Cocok agar bot tetap aktif bekerja meskipun aplikasi Terminal Anda ditutup:
-
 ```bash
 # 1. Menjalankan bot di background
 ./service.sh start
@@ -183,10 +194,12 @@ Cocok agar bot tetap aktif bekerja meskipun aplikasi Terminal Anda ditutup:
 
 | Perintah | Fungsi | Contoh Penggunaan |
 | :--- | :--- | :--- |
-| **Pesan Biasa** | Mengirimkan prompt / tugas coding ke Antigravity Agent | *"Buatkan skrip backup DB dengan Python"* |
+| **Pesan Teks** | Mengirim prompt / tugas coding ke Antigravity Agent | *"Buatkan skrip backup DB dengan Python"* |
+| **Voice Note (VN)** | Merekam suara, otomatis ditranskripsikan dan dikerjakan | *(Kirim rekaman suara via Telegram)* |
+| **Kirim Gambar / Foto** | Mengunggah screenshot UI / error beserta caption | *(Kirim gambar dengan caption instruksi)* |
 | `/start` / `/help` | Menampilkan menu bantuan dan status bot | `/start` |
 | `/new` / `/reset` | Mereset memori percakapan ke sesi baru | `/new` |
-| `/status` | Cek workspace aktif, model, dan conversation ID | `/status` |
+| `/status` | Cek workspace aktif, model, audio/image status, dll. | `/status` |
 | `/workspace <path>` | Menampilkan atau mengubah folder kerja proyek | `/workspace /Users/user/Code/my-app` |
 | `/model <nama>` | Mengubah model AI atau kembali ke default | `/model gemini-2.5-pro` atau `/model default` |
 | `/effort <level>` | Mengatur penalaran AI (`low`, `medium`, `high`, `default`) | `/effort high` |
@@ -196,15 +209,14 @@ Cocok agar bot tetap aktif bekerja meskipun aplikasi Terminal Anda ditutup:
 
 ## 💡 Contoh Penggunaan Nyata
 
-1. **Memeriksa & Memodifikasi File Proyek:**
-   > *"Tolong cek file `src/app.py`, apakah ada potensi error pada penanganan error database?"*
+1. **Membuat UI dari Screenshot Gambar:**
+   > Unggah screenshot halaman web dengan caption: *"Buatkan halaman HTML dan Tailwind CSS yang persis seperti desain pada gambar ini di file `landing.html`"*
 
-2. **Membuat Fitur Baru:**
-   > *"Buatkan endpoint baru di Express.js untuk autentikasi JWT di file `routes/auth.js`"*
+2. **Memperbaiki Error dari Screenshot Terminal:**
+   > Unggah screenshot pesan error terminal dengan caption: *"Perbaiki bug ini di kode proyek saya"*
 
-3. **Pindah Proyek:**
-   > Kirim: `/workspace /home/username/Code/project-b`  
-   > Lalu kirim: *"Jelaskan arsitektur folder di proyek ini"*
+3. **Memberikan Perintah Melalui Rekaman Suara:**
+   > Kirim Voice Note: *"Tolong tambahkan validasi email dan password pada file auth controller"*
 
 ---
 
@@ -212,26 +224,10 @@ Cocok agar bot tetap aktif bekerja meskipun aplikasi Terminal Anda ditutup:
 
 > [!CAUTION]
 > **JANGAN PERNAH MENGUNGGAH FILE `.env` KE GITHUB!**  
-> File `.env` berisi Token Bot Telegram dan User ID pribadi Anda. File `.gitignore` pada repositori ini sudah dikonfigurasi untuk secara otomatis mengabaikan file `.env`.
-
-- **Whitelist User ID**: Pastikan `ALLOWED_TELEGRAM_USER_ID` diisi dengan benar agar orang lain di Telegram tidak dapat mengeksekusi perintah di komputer Anda.
-- **Autentikasi Lokal**: Program ini berjalan langsung di komputer Anda secara lokal dan hanya berkomunikasi melalui channel bot Telegram resmi.
-
----
-
-## ❓ Troubleshooting
-
-1. **Bot tidak merespons di Telegram?**
-   - Pastikan bot sedang berjalan: `./service.sh status`
-   - Cek log error: `./service.sh logs`
-   - Pastikan User ID Telegram Anda sesuai dengan `ALLOWED_TELEGRAM_USER_ID` di `.env`.
-
-2. **Error `Binary 'agy' tidak ditemukan`?**
-   - Pastikan Antigravity CLI sudah terpasang. Jalankan `which agy` di terminal Anda.
-   - Sesuaikan path `AGY_BINARY_PATH` di `.env` sesuai hasil dari `which agy`.
+> File `.gitignore` pada repositori ini sudah dikonfigurasi untuk secara otomatis mengabaikan file `.env`.
 
 ---
 
 ## 📄 Lisensi
 
-Proyek ini dilisensikan di bawah [MIT License](LICENSE). Bebas digunakan, dimodifikasi, dan dikembangkan kembali.
+Proyek ini dilisensikan di bawah [MIT License](LICENSE). Bebas digunakan dan dikembangkan kembali.
