@@ -84,18 +84,19 @@ git clone https://github.com/USERNAME/antigravity-telegram-bridge.git
 cd antigravity-telegram-bridge
 ```
 
-#### 3. Jalankan Script Setup Otomatis
-Script ini akan menginstal Python, FFmpeg, dependensi virtual environment, dan Antigravity CLI secara otomatis:
+#### 3. Inisiasi & Konfigurasi Kredensial (Interaktif)
+Jalankan setup wizard untuk mengatur Token Bot Telegram & User ID secara interaktif dan aman:
 ```bash
-chmod +x setup_vps.sh install_systemd.sh
+chmod +x init.sh setup_vps.sh start.sh
+./init.sh
+```
+> **Atau konfigurasi manual:** salin file template dengan `cp .env.example .env` lalu edit dengan `nano .env`.
+
+#### 4. Jalankan Setup Sistem & Dependensi VPS
+Script ini akan menginstal dependensi OS (Python, FFmpeg) dan virtual environment secara otomatis:
+```bash
 ./setup_vps.sh
 ```
-
-#### 4. Edit File `.env`
-```bash
-nano .env
-```
-*(Masukkan `TELEGRAM_BOT_TOKEN`, `ALLOWED_TELEGRAM_USER_ID`, dan `ANTIGRAVITY_WORKSPACE`)*.
 
 #### 5. Daftarkan Service Systemd 24/7
 ```bash

@@ -45,20 +45,26 @@ fi
 
 # 4. Siapkan File Konfigurasi .env
 echo "⚙️ [4/5] Menyiapkan file konfigurasi..."
-if [ ! -f .env ]; then
-    cp .env.example .env
-    echo "⚠️ File .env baru dibuat. Silakan edit file .env dan isi TELEGRAM_BOT_TOKEN serta ALLOWED_TELEGRAM_USER_ID."
+if [ -t 0 ]; then
+    echo "💡 Menjalankan wizard inisiasi kredensial..."
+    "$DIR/venv/bin/python" "$DIR/init_config.py" || true
+else
+    if [ ! -f .env ]; then
+        cp .env.example .env
+        echo "⚠️ File .env dibuat dari template. Silakan jalankan ./init.sh untuk mengatur token."
+    fi
 fi
 
 # Berikan izin eksekusi untuk semua script
-chmod +x start.sh service.sh bot.py setup_vps.sh install_systemd.sh 2>/dev/null || true
+chmod +x start.sh service.sh bot.py setup_vps.sh install_systemd.sh init.sh 2>/dev/null || true
 
 echo "=========================================================="
 echo "✅ Setup Dasar Selesai!"
 echo "=========================================================="
 echo ""
 echo "Langkah selanjutnya:"
-echo "1. Pastikan Anda sudah mengedit file .env (nano .env)"
-echo "2. Jalankan bot 24/7 sebagai Systemd Service dengan:"
+echo "1. Untuk mengubah konfigurasi kapan saja: ./init.sh"
+echo "2. Jalankan bot secara langsung: ./start.sh"
+echo "3. Atau jalankan bot 24/7 di background (Systemd):"
 echo "   sudo ./install_systemd.sh"
 echo ""

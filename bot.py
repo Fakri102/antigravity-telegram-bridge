@@ -24,6 +24,7 @@ import logging
 import platform
 from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
+from init_config import check_and_ensure_credentials, run_interactive_setup
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -767,14 +768,34 @@ async def photo_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"⚠️ Gagal mengunduh gambar:\n<code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
 
 def main():
+    global TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, DEFAULT_WORKSPACE, GEMINI_API_KEY, AGY_PATH
+
+    if "--setup" in sys.argv or "--init" in sys.argv or "-s" in sys.argv:
+        run_interactive_setup(force=True)
+        sys.exit(0)
+
+    if not TELEGRAM_BOT_TOKEN:
+        if check_and_ensure_credentials():
+            load_dotenv(override=True)
+            TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+            ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
+            DEFAULT_WORKSPACE = os.getenv("ANTIGRAVITY_WORKSPACE", os.path.expanduser("~"))
+            GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+            AGY_PATH = find_agy_binary()
+            if ALLOWED_USER_IDS_RAW:
+                for uid in ALLOWED_USER_IDS_RAW.split(","):
+                    uid_clean = uid.strip()
+                    if uid_clean.isdigit():
+                        ALLOWED_USER_IDS.add(int(uid_clean))
+        else:
+            print("❌ Error: TELEGRAM_BOT_TOKEN belum diisi di file .env")
+            print("Jalankan './init.sh' untuk inisiasi kredensial.")
+            sys.exit(1)
+
     if not os.path.exists(AGY_PATH) and not shutil.which("agy"):
         logger.error(f"Binary 'agy' tidak ditemukan di path: {AGY_PATH}")
         print(f"❌ Error: Binary 'agy' tidak ditemukan di: {AGY_PATH}")
         print("Pastikan Antigravity CLI telah terinstal.")
-        sys.exit(1)
-
-    if not TELEGRAM_BOT_TOKEN:
-        print("❌ Error: TELEGRAM_BOT_TOKEN belum diisi di file .env")
         sys.exit(1)
 
     if not ALLOWED_USER_IDS:

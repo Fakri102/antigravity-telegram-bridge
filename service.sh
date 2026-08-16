@@ -14,9 +14,10 @@ case "$1" in
             exit 1
         fi
 
-        TOKEN=$(grep "TELEGRAM_BOT_TOKEN=" .env | cut -d '=' -f2 | tr -d ' "')
+        TOKEN=$(grep -E "^TELEGRAM_BOT_TOKEN=" .env 2>/dev/null | cut -d '=' -f2 | tr -d ' "')
         if [ -z "$TOKEN" ]; then
             echo "❌ ERROR: TELEGRAM_BOT_TOKEN belum diisi di $DIR/.env"
+            echo "Silakan jalankan './init.sh' untuk inisiasi kredensial."
             exit 1
         fi
 
