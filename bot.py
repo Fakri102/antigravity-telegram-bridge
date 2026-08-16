@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Antigravity Telegram Bridge (Production & Rich UI Edition)
-Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Komputer / VPS Linux / Mac.
+Antigravity Telegram Bridge (Universal Cross-Platform Edition)
+Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Komputer / VPS Linux / macOS / Windows.
 
-Fitur Unggulan:
+Fitur Unggulan & Cross-Platform:
+- 🌐 Universal OS Support: Windows (10/11), Linux (Ubuntu, Debian, CentOS, Arch), macOS (Intel & Apple Silicon), Docker
 - 📱 Modern Telegram UI: Inline Keyboards, Quick Actions, Status Bar, Menu Bar Integration
 - ⚡ Model Selector: Dukungan Gemini 3.7 Flash, Gemini 3.1 Pro, Gemini 3.6 Flash
 - 🧠 Reasoning Effort: High, Medium, Low toggle
@@ -12,7 +13,7 @@ Fitur Unggulan:
 - 📊 Real-Time Server Healthcheck (CPU, RAM meter, Disk meter, Uptime)
 - 🎙️ Multimodal Voice Transcriber (Gemini 3.7 / 3.6 Audio)
 - 🖼️ Vision & Screenshot Input
-- 🛡️ Process Group Isolation & Fast /cancel
+- 🛡️ Cross-Platform Process Group Isolation & Fast /cancel (POSIX & Windows taskkill)
 """
 
 import os
@@ -60,6 +61,11 @@ try:
 except ImportError:
     psutil = None
 
+# OS Platform Identification
+IS_WINDOWS = (platform.system() == "Windows")
+IS_MACOS = (platform.system() == "Darwin")
+IS_LINUX = (platform.system() == "Linux")
+
 # Load environment configuration
 load_dotenv()
 
@@ -83,30 +89,81 @@ DEFAULT_EFFORT = os.getenv("ANTIGRAVITY_EFFORT", "high").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EXECUTION_TIMEOUT = int(os.getenv("ANTIGRAVITY_TIMEOUT", "300"))  # Default 5 menit timeout
 
-# Dynamic Binary Discovery for agy
+# Dynamic Binary Discovery for agy (Cross-Platform)
 def find_agy_binary() -> str:
+    """Mendeteksi lokasi binary agy di berbagai OS (Linux, macOS, Windows)."""
     env_path = os.getenv("AGY_BINARY_PATH", "").strip()
-    if env_path and os.path.exists(os.path.expanduser(env_path)):
-        return os.path.abspath(os.path.expanduser(env_path))
+    if env_path:
+        expanded = os.path.abspath(os.path.expanduser(env_path))
+        if os.path.exists(expanded):
+            return expanded
 
-    which_path = shutil.which("agy")
-    if which_path and os.path.exists(which_path):
-        return which_path
+    # Cek melalui PATH dengan ekstensi binary yang sesuai
+    candidate_names = ["agy.cmd", "agy.exe", "agy.bat", "agy"] if IS_WINDOWS else ["agy"]
+    for name in candidate_names:
+        which_path = shutil.which(name)
+        if which_path and os.path.exists(which_path):
+            return which_path
 
-    common_paths = [
-        os.path.expanduser("~/.local/bin/agy"),
-        "/usr/local/bin/agy",
-        "/usr/bin/agy",
-        "/opt/homebrew/bin/agy",
-        "/home/linuxbrew/.linuxbrew/bin/agy"
-    ]
+    # Path umum default per sistem operasi
+    home = os.path.expanduser("~")
+    common_paths = []
+
+    if IS_WINDOWS:
+        appdata = os.getenv("APPDATA", "")
+        localappdata = os.getenv("LOCALAPPDATA", "")
+        common_paths.extend([
+            os.path.join(home, ".local", "bin", "agy.exe"),
+            os.path.join(home, ".local", "bin", "agy.cmd"),
+            os.path.join(home, ".local", "bin", "agy.bat"),
+            os.path.join(localappdata, "Programs", "Antigravity", "bin", "agy.cmd"),
+            os.path.join(localappdata, "Programs", "Antigravity", "agy.exe"),
+            r"C:\Program Files\Antigravity\agy.exe",
+            r"C:\ProgramData\chocolatey\bin\agy.exe",
+        ])
+    else:
+        common_paths.extend([
+            os.path.join(home, ".local", "bin", "agy"),
+            "/usr/local/bin/agy",
+            "/usr/bin/agy",
+            "/opt/homebrew/bin/agy",
+            "/home/linuxbrew/.linuxbrew/bin/agy",
+        ])
+
     for p in common_paths:
-        if os.path.exists(p):
+        if p and os.path.exists(p):
             return p
 
     return "agy"
 
 AGY_PATH = find_agy_binary()
+
+# Cross-platform Process Tree Killer
+def kill_process_tree(pid: Optional[int], sig=signal.SIGTERM):
+    """Menghentikan proses dan seluruh child process secara cross-platform."""
+    if not pid:
+        return
+    try:
+        if IS_WINDOWS:
+            # Di Windows gunakan taskkill untuk mematikan process tree (/T) secara paksa (/F)
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+            logger.info(f"Terminated Windows process tree for PID {pid}")
+        else:
+            if hasattr(os, "killpg") and hasattr(os, "getpgid"):
+                try:
+                    os.killpg(os.getpgid(pid), sig)
+                except Exception:
+                    os.kill(pid, sig)
+            else:
+                os.kill(pid, sig)
+            logger.info(f"Terminated POSIX process group for PID {pid}")
+    except Exception as e:
+        logger.debug(f"Error killing process {pid}: {e}")
 
 # Parse allowed IDs
 ALLOWED_USER_IDS: Set[int] = set()
@@ -148,7 +205,7 @@ def make_progress_bar(percent: float, length: int = 10) -> str:
     filled = max(0, min(length, int(round(length * percent / 100.0))))
     return "[" + "█" * filled + "░" * (length - filled) + f"] {percent:.1f}%"
 
-# System Metrics Helper
+# System Metrics Helper (Cross-Platform)
 def get_system_stats() -> dict:
     """Mengambil informasi sistem server (Uptime, OS, CPU, RAM, Disk)."""
     stats = {}
@@ -179,9 +236,10 @@ def get_system_stats() -> dict:
         stats["ram_bar"] = ""
         stats["ram"] = "N/A"
 
-    # Disk usage
+    # Disk usage (Cross-platform root drive)
     try:
-        total, used, free = shutil.disk_usage("/")
+        drive_root = os.path.splitdrive(os.getcwd())[0] + "\\" if IS_WINDOWS else "/"
+        total, used, free = shutil.disk_usage(drive_root)
         disk_pct = (used / total) * 100.0
         used_gb = used // (1024 ** 3)
         total_gb = total // (1024 ** 3)
@@ -309,7 +367,7 @@ def build_start_text(username: str, session: UserSession) -> str:
     return (
         f"🚀 <b>Antigravity Telegram Bridge</b> <code>v2.5</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Halo <b>{username}</b>! Bot siap menerima instruksi AI coding & terminal 24/7.\n\n"
+        f"Halo <b>{username}</b>! Bot siap menerima instruksi AI coding & terminal 24/7 di {platform.system()}.\n\n"
         f"📊 <b>Konfigurasi Aktif:</b>\n"
         f"• 🧠 <b>Model:</b> <code>{html.escape(model_str)}</code>\n"
         f"• ⚡ <b>Reasoning:</b> <code>{html.escape(effort_str)}</code>\n"
@@ -793,7 +851,7 @@ async def mode_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Mode tidak valid. Gunakan <code>plan</code>, <code>accept-edits</code>, atau <code>default</code>.", parse_mode=ParseMode.HTML)
 
 async def ls_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """File & directory explorer interaktif di workspace."""
+    """File & directory explorer interaktif di workspace (Cross-Platform)."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         return
@@ -839,7 +897,7 @@ async def ls_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif ext in [".js", ".ts", ".jsx", ".tsx"]: icon = "🟨"
             elif ext in [".json", ".yaml", ".yml", ".toml"]: icon = "📦"
             elif ext in [".md", ".txt"]: icon = "📝"
-            elif ext in [".sh", ".bash"]: icon = "🐚"
+            elif ext in [".sh", ".bash", ".bat", ".cmd", ".ps1"]: icon = "🐚"
             elif ext in [".png", ".jpg", ".jpeg", ".gif", ".webp"]: icon = "🖼️"
             elif ext in [".html", ".css"]: icon = "🌐"
 
@@ -879,7 +937,7 @@ async def ls_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def git_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Melihat status Git repository di workspace aktif."""
+    """Melihat status Git repository di workspace aktif (Cross-Platform)."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         return
@@ -935,18 +993,19 @@ async def git_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ Gagal memeriksa Git: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
 
 async def sh_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menjalankan perintah terminal / shell cepat di workspace."""
+    """Menjalankan perintah terminal / shell cepat di workspace (Cross-Platform)."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         return
 
     if not context.args:
+        shell_example = "dir" if IS_WINDOWS else "ls -la"
         await update.message.reply_text(
-            "⚡ <b>Shell Command Runner</b>\n\n"
-            "Contoh penggunaan:\n"
-            "<code>/sh ls -la</code>\n"
-            "<code>/sh git status</code>\n"
-            "<code>/sh npm test</code>",
+            f"⚡ <b>Shell Command Runner ({platform.system()})</b>\n\n"
+            f"Contoh penggunaan:\n"
+            f"<code>/sh {shell_example}</code>\n"
+            f"<code>/sh git status</code>\n"
+            f"<code>/sh npm test</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -1011,11 +1070,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if session.current_task and not session.current_task.done():
         session.current_task.cancel()
         if session.current_pid:
-            try:
-                os.killpg(os.getpgid(session.current_pid), signal.SIGTERM)
-                logger.info(f"Killed process group for PID {session.current_pid}")
-            except Exception as e:
-                logger.warning(f"Error killing process: {e}")
+            kill_process_tree(session.current_pid, signal.SIGTERM)
         await update.message.reply_text("🛑 <b>Tugas yang sedang berjalan berhasil dibatalkan.</b>", parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text("ℹ️ Tidak ada tugas yang sedang berjalan.", parse_mode=ParseMode.HTML)
@@ -1170,10 +1225,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         if session.current_task and not session.current_task.done():
             session.current_task.cancel()
             if session.current_pid:
-                try:
-                    os.killpg(os.getpgid(session.current_pid), signal.SIGTERM)
-                except Exception:
-                    pass
+                kill_process_tree(session.current_pid, signal.SIGTERM)
             await query.answer("🛑 Tugas dibatalkan.", show_alert=True)
             await query.message.reply_text("🛑 <b>Tugas berhasil dibatalkan.</b>", parse_mode=ParseMode.HTML)
         else:
@@ -1186,7 +1238,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     elif data == "cb:ls":
         await query.answer()
-        # Trigger file explorer
         class MockContext:
             args = []
         await ls_handler(query, MockContext())
@@ -1198,11 +1249,11 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         await git_handler(query, MockContext())
 
 # ==========================================
-# AGY EXECUTION & TASK PIPELINE
+# AGY EXECUTION & TASK PIPELINE (CROSS-PLATFORM)
 # ==========================================
 
 async def execute_antigravity(session: UserSession, prompt: str) -> dict:
-    """Menjalankan agy CLI non-interaktif dengan process group isolation & timeout."""
+    """Menjalankan agy CLI non-interaktif dengan process group isolation & timeout aman di semua OS."""
     cmd = [
         AGY_PATH,
         "--output-format", "json",
@@ -1227,13 +1278,21 @@ async def execute_antigravity(session: UserSession, prompt: str) -> dict:
 
     logger.info(f"Menjalankan agy di '{cwd}' | Model: {session.model} | Prompt: {prompt[:80]}...")
 
-    # Spawn process dengan isolated process group (preexec_fn=os.setsid)
+    # Konfigurasi Subprocess Cross-Platform
+    subproc_kwargs = {}
+    if IS_WINDOWS:
+        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            subproc_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        if hasattr(os, "setsid"):
+            subproc_kwargs["preexec_fn"] = os.setsid
+
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
-        preexec_fn=os.setsid if hasattr(os, "setsid") else None
+        **subproc_kwargs
     )
     session.current_pid = process.pid
 
@@ -1241,10 +1300,7 @@ async def execute_antigravity(session: UserSession, prompt: str) -> dict:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=EXECUTION_TIMEOUT)
     except asyncio.TimeoutError:
         if process.pid:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except Exception:
-                pass
+            kill_process_tree(process.pid, signal.SIGKILL if not IS_WINDOWS else signal.SIGTERM)
         raise RuntimeError(f"Tugas timeout melebihi batas waktu {EXECUTION_TIMEOUT} detik.")
     finally:
         session.current_pid = None
@@ -1513,20 +1569,20 @@ def main():
                         ALLOWED_USER_IDS.add(int(uid_clean))
         else:
             print("❌ Error: TELEGRAM_BOT_TOKEN belum diisi di file .env")
-            print("Jalankan './init.sh' untuk inisiasi kredensial.")
+            print("Jalankan './init.sh' atau 'init.bat' untuk inisiasi kredensial.")
             sys.exit(1)
 
     if not os.path.exists(AGY_PATH) and not shutil.which("agy"):
         logger.error(f"Binary 'agy' tidak ditemukan di path: {AGY_PATH}")
         print(f"❌ Error: Binary 'agy' tidak ditemukan di: {AGY_PATH}")
-        print("Pastikan Antigravity CLI telah terinstal.")
+        print("Pastikan Antigravity CLI telah terinstal di sistem operasi Anda.")
         sys.exit(1)
 
     if not ALLOWED_USER_IDS:
         print("⚠️ PERINGATAN: ALLOWED_TELEGRAM_USER_ID belum diisi di .env.")
         print("Bot akan menolak semua pesan hingga Anda menambahkan ID Anda.")
 
-    logger.info("Memulai Antigravity Telegram Bridge (Production Rich UI Engine)...")
+    logger.info(f"Memulai Antigravity Telegram Bridge di {platform.system()} ({platform.machine()})...")
     application = (
         ApplicationBuilder()
         .token(TELEGRAM_BOT_TOKEN)
@@ -1565,8 +1621,8 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO, photo_image_handler))
     application.add_handler(MessageHandler(filters.Document.IMAGE, photo_image_handler))
 
-    print(f"🤖 Antigravity Telegram Bridge AKTIF (Rich UI & Interactive Menu)")
-    print(f"🖥️ Platform: {platform.system()} {platform.machine()}")
+    print(f"🤖 Antigravity Telegram Bridge AKTIF (Cross-Platform Edition)")
+    print(f"🖥️ Sistem Operasi: {platform.system()} {platform.release()} ({platform.machine()})")
     print(f"⚙️ Binary Path: {AGY_PATH}")
     print(f"🧠 Default Model: {DEFAULT_MODEL} (Effort: {DEFAULT_EFFORT})")
     print(f"📂 Default Workspace: {DEFAULT_WORKSPACE}")

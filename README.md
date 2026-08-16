@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Multimodal](https://img.shields.io/badge/multimodal-Text%20%7C%20Voice%20%7C%20Images-brightgreen.svg)]()
 [![Production Ready](https://img.shields.io/badge/systemd-24%2F7%20Daemon-orange.svg)]()
-[![Platform](https://img.shields.io/badge/platform-Linux%20VPS%20%7C%20macOS%20%7C%20Docker-lightgrey.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux%20VPS%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker-lightgrey.svg)]()
 
-> Jalankan **Google Antigravity CLI (`agy`)** 24/7 di Server VPS Linux atau Komputer Lokal Anda dan berikan instruksi coding secara remote via **Telegram** (Teks, Voice Note, Screenshot Desain, atau Error Log).
+> Jalankan **Google Antigravity CLI (`agy`)** 24/7 di Linux VPS, macOS, atau Windows PC dan berikan instruksi coding secara remote via **Telegram** (Teks, Voice Note, Screenshot Desain, atau Error Log).
 
 ---
 
@@ -14,10 +14,11 @@
 
 - [Arsitektur](#-arsitektur)
 - [Fitur Utama](#-fitur-utama)
-- [Panduan Deployment ke Server VPS (Production 24/7)](#-panduan-deployment-ke-server-vps-production-247)
-  - [Metode 1: Otomatis via Systemd (Disarankan)](#metode-1-otomatis-via-systemd-disarankan-untuk-vps)
+- [Panduan Instalasi & Deployment](#-panduan-instalasi--deployment)
+  - [Metode 1: Linux VPS via Systemd (Production 24/7)](#metode-1-otomatis-via-systemd-disarankan-untuk-vps)
   - [Metode 2: Docker & Docker Compose](#metode-2-docker--docker-compose)
-  - [Metode 3: Lokal di macOS / Laptop](#metode-3-menjalankan-di-macos--laptop-lokal)
+  - [Metode 3: macOS (Apple Silicon / Intel)](#metode-3-menjalankan-di-macos--laptop-lokal)
+  - [Metode 4: Windows (10 / 11 / Server)](#metode-4-menjalankan-di-windows-10--11)
 - [Konfigurasi `.env`](#-%EF%B8%8F-konfigurasi-env)
 - [Daftar Perintah Telegram](#-daftar-perintah-telegram)
 - [Monitoring & Healthcheck Server](#-monitoring--healthcheck-server)
@@ -151,6 +152,28 @@ cd antigravity-telegram-bridge
 
 # Hentikan
 ./service.sh stop
+```
+
+---
+
+### Metode 4: Menjalankan di Windows (10 / 11 / Server)
+
+#### 1. Buka PowerShell atau Command Prompt (CMD)
+```powershell
+git clone https://github.com/USERNAME/antigravity-telegram-bridge.git
+cd antigravity-telegram-bridge
+```
+
+#### 2. Jalankan Setup 1-Klik Otomatis
+Cukup klik ganda file `setup_windows.bat` di File Explorer, atau jalankan via terminal:
+```cmd
+setup_windows.bat
+```
+*Skrip ini akan membuat Python venv, menginstal dependensi, dan membuka setup wizard untuk mengisi token Telegram Anda.*
+
+#### 3. Menjalankan Bot di Windows
+```cmd
+start.bat
 ```
 
 ---
