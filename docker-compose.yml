@@ -1,0 +1,13 @@
+services:
+  antigravity-bridge:
+    build: .
+    container_name: antigravity-telegram-bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /var/www:/workspace
+      - ./uploads:/app/uploads
+      - /root/.gemini:/root/.gemini
+    environment:
+      - ANTIGRAVITY_WORKSPACE=/workspace

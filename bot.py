@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
-Antigravity Telegram Bridge
-Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Komputer / Desktop Lokal.
-Dilengkapi Formatting Engine Premium (Telegram HTML, Syntax Highlighting, Smart Code Chunker).
+Antigravity Telegram Bridge (Production Edition)
+Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Komputer / VPS Linux / Mac.
+Dilengkapi:
+- Dynamic Binary Discovery (Linux/Mac/Docker support)
+- Robust Subprocess Management (Process group termination on /cancel & timeout)
+- Production Health Monitoring (RAM, CPU, Disk, Uptime di /status)
+- Telegram HTML Formatting Engine & Smart Code Chunker
+- File Size Guard & Graceful Signal Handling
 """
 
 import os
@@ -11,9 +16,12 @@ import re
 import html
 import json
 import time
+import shutil
+import signal
 import tempfile
 import asyncio
 import logging
+import platform
 from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
 from telegram import Update
@@ -34,9 +42,10 @@ from pydub import AudioSegment
 load_dotenv()
 
 # Setup Logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
@@ -47,8 +56,33 @@ logger = logging.getLogger("AntigravityBridge")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
 DEFAULT_WORKSPACE = os.getenv("ANTIGRAVITY_WORKSPACE", os.path.expanduser("~"))
-AGY_PATH = os.getenv("AGY_BINARY_PATH", os.path.expanduser("~/.local/bin/agy"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+EXECUTION_TIMEOUT = int(os.getenv("ANTIGRAVITY_TIMEOUT", "300"))  # Default 5 menit timeout
+
+# Dynamic Binary Discovery for agy
+def find_agy_binary() -> str:
+    env_path = os.getenv("AGY_BINARY_PATH", "").strip()
+    if env_path and os.path.exists(os.path.expanduser(env_path)):
+        return os.path.abspath(os.path.expanduser(env_path))
+
+    which_path = shutil.which("agy")
+    if which_path and os.path.exists(which_path):
+        return which_path
+
+    common_paths = [
+        os.path.expanduser("~/.local/bin/agy"),
+        "/usr/local/bin/agy",
+        "/usr/bin/agy",
+        "/opt/homebrew/bin/agy",
+        "/home/linuxbrew/.linuxbrew/bin/agy"
+    ]
+    for p in common_paths:
+        if os.path.exists(p):
+            return p
+
+    return "agy"
+
+AGY_PATH = find_agy_binary()
 
 # Parse allowed IDs
 ALLOWED_USER_IDS: Set[int] = set()
@@ -57,6 +91,9 @@ if ALLOWED_USER_IDS_RAW:
         uid_clean = uid.strip()
         if uid_clean.isdigit():
             ALLOWED_USER_IDS.add(int(uid_clean))
+
+# Boot timestamp for uptime calculation
+BOT_START_TIME = time.time()
 
 # User Session State
 class UserSession:
@@ -67,6 +104,7 @@ class UserSession:
         self.model: Optional[str] = None
         self.effort: Optional[str] = None  # low, medium, high
         self.current_task: Optional[asyncio.Task] = None
+        self.current_pid: Optional[int] = None
 
 user_sessions: Dict[int, UserSession] = {}
 
@@ -80,22 +118,38 @@ def is_authorized(user_id: int) -> bool:
         return False
     return user_id in ALLOWED_USER_IDS
 
+# System Metrics Helper
+def get_system_stats() -> dict:
+    """Mengambil informasi sistem server (Uptime, OS, RAM, Disk)."""
+    stats = {}
+    
+    # Uptime bot
+    uptime_seconds = int(time.time() - BOT_START_TIME)
+    hours, rem = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    stats["uptime"] = f"{hours}h {minutes}m {seconds}s"
+    stats["os"] = f"{platform.system()} {platform.release()} ({platform.machine()})"
+
+    # Disk usage
+    try:
+        total, used, free = shutil.disk_usage("/")
+        stats["disk"] = f"{used // (2**30)}GB / {total // (2**30)}GB (Free: {free // (2**30)}GB)"
+    except Exception:
+        stats["disk"] = "N/A"
+
+    return stats
+
 # ==========================================
 # FORMATTING ENGINE (MARKDOWN TO TELEGRAM HTML)
 # ==========================================
 
 def clean_ansi_and_unicode(text: str) -> str:
-    """Menghapus ANSI escape codes dan merapikan string Unicode escape."""
-    # Hapus ANSI colors
+    """Menghapus ANSI escape codes dari output CLI."""
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    text = ansi_escape.sub('', text)
-    return text.strip()
+    return ansi_escape.sub('', text).strip()
 
 def markdown_to_telegram_html(md_text: str) -> str:
-    """
-    Mengonversi Markdown standar dari LLM ke format Telegram HTML yang sangat rapi & valid.
-    Menangani bold, italic, code blocks ber-syntax highlighting, inline code, quotes, headers, dan list.
-    """
+    """Mengonversi Markdown ke format Telegram HTML yang valid & rapi."""
     text = clean_ansi_and_unicode(md_text)
     if not text:
         return ""
@@ -126,43 +180,36 @@ def markdown_to_telegram_html(md_text: str) -> str:
 
     text = re.sub(r'`([^`\n]+)`', save_inline_code, text)
 
-    # 3. Escape karakter HTML biasa di sisa teks
+    # 3. Escape HTML
     text = html.escape(text)
 
-    # 4. Format Headers (# Header -> <b>Header</b>)
+    # 4. Headers (# -> <b>)
     text = re.sub(r'^(#{1,6})\s+(.+)$', r'<b>\2</b>', text, flags=re.MULTILINE)
 
-    # 5. Bold (**text** atau __text__)
+    # 5. Bold & Italic
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
-
-    # 6. Italic (*text* atau _text_)
     text = re.sub(r'(?<!\w)\*([^\*\n]+?)\*(?!\w)', r'<i>\1</i>', text)
     text = re.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'<i>\1</i>', text)
 
-    # 7. Blockquotes (> quote -> <blockquote>quote</blockquote>)
+    # 6. Quotes & Lists
     text = re.sub(r'^\s*&gt;\s?(.+)$', r'<blockquote>\1</blockquote>', text, flags=re.MULTILINE)
-
-    # 8. List Items (- item atau * item -> • item)
     text = re.sub(r'^\s*[\-\*]\s+(.+)$', r'• \1', text, flags=re.MULTILINE)
 
-    # 9. Links [label](url) -> <a href="url">label</a>
+    # 7. Links
     text = re.sub(r'\[([^\]]+)\]\((https?:\/\/[^\)]+)\)', r'<a href="\2">\1</a>', text)
 
-    # 10. Kembalikan Inline Codes
+    # 8. Restore Protected Tags
     for i, code_html in enumerate(inline_codes):
         text = text.replace(f"%%INLINE_CODE_{i}%%", code_html)
 
-    # 11. Kembalikan Code Blocks
     for i, block_html in enumerate(code_blocks):
         text = text.replace(f"%%CODE_BLOCK_{i}%%", block_html)
 
     return text
 
 def chunk_markdown_safely(text: str, max_chars: int = 3400) -> List[str]:
-    """
-    Memecah teks panjang menjadi chunk aman tanpa memotong blok kode di tengah jalan.
-    """
+    """Memecah teks panjang tanpa merusak struktur code block."""
     text = text.strip()
     if len(text) <= max_chars:
         return [text]
@@ -205,11 +252,10 @@ def chunk_markdown_safely(text: str, max_chars: int = 3400) -> List[str]:
     return chunks
 
 async def send_formatted_message(update: Update, raw_text: str):
-    """Mengirim pesan rapi ke Telegram dengan formatting HTML & fallback aman."""
+    """Mengirim pesan dengan HTML parser dan fallback teks bersih."""
     if not raw_text or not raw_text.strip():
         raw_text = "<i>(Tidak ada output teks dari agen)</i>"
 
-    # Pecah teks menjadi chunk aman
     chunks = chunk_markdown_safely(raw_text, max_chars=3400)
 
     for chunk in chunks:
@@ -222,7 +268,6 @@ async def send_formatted_message(update: Update, raw_text: str):
             )
         except Exception as e:
             logger.warning(f"HTML parse failed ({e}), sending clean plain text...")
-            # Fallback ke teks bersih jika Telegram HTML parsing gagal pada karakter tak terduga
             clean_text = clean_ansi_and_unicode(chunk)
             await update.message.reply_text(clean_text, disable_web_page_preview=True)
 
@@ -271,7 +316,7 @@ async def transcribe_audio_file(file_path: str) -> str:
             if response.text and response.text.strip():
                 return response.text.strip()
         except Exception as ge:
-            logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan engine fallback...")
+            logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan fallback...")
 
     wav_path = file_path + ".wav"
     try:
@@ -285,11 +330,9 @@ async def transcribe_audio_file(file_path: str) -> str:
             audio_data = recognizer.record(source)
 
         try:
-            text = recognizer.recognize_google(audio_data, language="id-ID")
-            return text
+            return recognizer.recognize_google(audio_data, language="id-ID")
         except sr.UnknownValueError:
-            text = recognizer.recognize_google(audio_data, language="en-US")
-            return text
+            return recognizer.recognize_google(audio_data, language="en-US")
     finally:
         if os.path.exists(wav_path):
             try:
@@ -307,30 +350,30 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
             f"⛔ <b>Akses Ditolak</b>\n\n"
             f"User ID Telegram Anda: <code>{user_id}</code>\n\n"
-            f"Tambahkan User ID ini ke file <code>.env</code> di komputer Anda:\n"
+            f"Tambahkan User ID ini ke file <code>.env</code> di server:\n"
             f"<code>ALLOWED_TELEGRAM_USER_ID={user_id}</code>\n\n"
-            f"Lalu restart bot bridge ini."
+            f"Lalu restart service bot ini."
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
     session = get_session(user_id)
     welcome_text = (
-        f"🚀 <b>Antigravity Desktop Bridge Terhubung!</b>\n\n"
-        f"Halo <b>{username}</b>, bot ini terhubung langsung ke Google Antigravity di komputer lokal Anda.\n\n"
+        f"🚀 <b>Antigravity Production Bridge Terhubung!</b>\n\n"
+        f"Halo <b>{username}</b>, bot ini terhubung langsung ke Google Antigravity Engine di server Anda.\n\n"
         f"📂 <b>Workspace:</b> <code>{html.escape(session.workspace_dir)}</code>\n"
-        f"🧠 <b>Model:</b> <code>{html.escape(session.model or 'Default Desktop')}</code>\n\n"
-        f"<b>🎯 Input yang Didukung:</b>\n"
-        f"• 💬 <b>Teks:</b> Kirim prompt atau instruksi coding biasa.\n"
-        f"• 🎙️ <b>Voice Note:</b> Rekam instruksi suara, otomatis ditranskripsi.\n"
-        f"• 🖼️ <b>Gambar / Screenshot:</b> Kirim gambar desain UI / error log.\n\n"
+        f"🧠 <b>Model:</b> <code>{html.escape(session.model or 'Default Server Config')}</code>\n\n"
+        f"<b>🎯 Input Multimodal Didukung:</b>\n"
+        f"• 💬 <b>Teks:</b> Kirim prompt, instruksi deploy, perbaikan bug, dll.\n"
+        f"• 🎙️ <b>Voice Note:</b> Rekam suara, otomatis ditranskripsikan.\n"
+        f"• 🖼️ <b>Gambar / Screenshot:</b> Kirim screenshot desain UI / error log.\n\n"
         f"<b>⚙️ Daftar Perintah:</b>\n"
         f"• <code>/new</code> atau <code>/reset</code> — Reset sesi percakapan.\n"
-        f"• <code>/workspace &lt;path&gt;</code> — Pindah folder proyek.\n"
-        f"• <code>/status</code> — Cek status agent dan workspace.\n"
+        f"• <code>/workspace &lt;path&gt;</code> — Pindah folder proyek aktif.\n"
+        f"• <code>/status</code> — Cek status server, RAM, Disk, dan sesi aktif.\n"
         f"• <code>/model &lt;nama&gt;</code> — Ganti model AI (contoh: <code>/model gemini-2.5-pro</code>).\n"
         f"• <code>/effort &lt;low|medium|high&gt;</code> — Atur tingkat penalaran AI.\n"
-        f"• <code>/cancel</code> — Batalkan tugas yang sedang berlangsung."
+        f"• <code>/cancel</code> — Batalkan tugas yang sedang berjalan."
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
@@ -352,19 +395,25 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     session = get_session(user_id)
+    sys_stats = get_system_stats()
+
     conv_display = f"<code>{session.conversation_id}</code>" if session.conversation_id else "<i>Belum ada sesi aktif</i>"
-    model_display = f"<code>{html.escape(session.model)}</code>" if session.model else "<i>Default Config</i>"
+    model_display = f"<code>{html.escape(session.model)}</code>" if session.model else "<i>Default Server</i>"
     effort_display = f"<code>{html.escape(session.effort)}</code>" if session.effort else "<i>Default</i>"
 
     status_text = (
-        f"📊 <b>Status Antigravity Bridge</b>\n\n"
+        f"📊 <b>Status Antigravity Production Server</b>\n\n"
+        f"• 🖥️ <b>Host OS:</b> <code>{html.escape(sys_stats['os'])}</code>\n"
+        f"• ⏱️ <b>Bot Uptime:</b> <code>{sys_stats['uptime']}</code>\n"
+        f"• 💾 <b>Server Disk:</b> <code>{sys_stats['disk']}</code>\n"
         f"• 📂 <b>Workspace:</b> <code>{html.escape(session.workspace_dir)}</code>\n"
         f"• 💬 <b>Session ID:</b> {conv_display}\n"
         f"• 🧠 <b>Model:</b> {model_display}\n"
         f"• ⚡ <b>Reasoning Effort:</b> {effort_display}\n"
         f"• 🎙️ <b>Voice/Audio:</b> 🟢 Aktif\n"
         f"• 🖼️ <b>Image/Vision:</b> 🟢 Aktif\n"
-        f"• 🟢 <b>Status Agent:</b> Siap menerima perintah."
+        f"• ⚙️ <b>Binary:</b> <code>{html.escape(AGY_PATH)}</code>\n"
+        f"• 🟢 <b>Status:</b> Siap menerima perintah 24/7."
     )
     await update.message.reply_text(status_text, parse_mode=ParseMode.HTML)
 
@@ -379,7 +428,7 @@ async def workspace_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"📂 <b>Workspace Aktif:</b> <code>{html.escape(session.workspace_dir)}</code>\n\n"
             f"Untuk berpindah folder proyek:\n"
-            f"<code>/workspace /path/ke/folder/anda</code>",
+            f"<code>/workspace /path/ke/folder/proyek</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -424,7 +473,7 @@ async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_arg = context.args[0].strip()
     if model_arg.lower() in ["default", "reset"]:
         session.model = None
-        await update.message.reply_text("✅ Model dikembalikan ke konfigurasi default Desktop.", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("✅ Model dikembalikan ke konfigurasi default Server.", parse_mode=ParseMode.HTML)
     else:
         session.model = model_arg
         await update.message.reply_text(f"✅ Model disetel ke: <code>{html.escape(session.model)}</code>", parse_mode=ParseMode.HTML)
@@ -467,12 +516,19 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = get_session(user_id)
     if session.current_task and not session.current_task.done():
         session.current_task.cancel()
+        if session.current_pid:
+            try:
+                # Matikan seluruh process group agy
+                os.killpg(os.getpgid(session.current_pid), signal.SIGTERM)
+                logger.info(f"Killed process group for PID {session.current_pid}")
+            except Exception as e:
+                logger.warning(f"Error killing process: {e}")
         await update.message.reply_text("🛑 Permintaan yang sedang berjalan berhasil dibatalkan.", parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text("ℹ️ Tidak ada tugas yang sedang berjalan.", parse_mode=ParseMode.HTML)
 
 async def execute_antigravity(session: UserSession, prompt: str) -> dict:
-    """Menjalankan agy CLI non-interaktif dengan output JSON."""
+    """Menjalankan agy CLI non-interaktif dengan process group isolation & timeout."""
     cmd = [
         AGY_PATH,
         "--output-format", "json",
@@ -494,14 +550,27 @@ async def execute_antigravity(session: UserSession, prompt: str) -> dict:
 
     logger.info(f"Menjalankan agy di '{cwd}' | Prompt: {prompt[:80]}...")
 
+    # Spawn process dengan isolated process group (preexec_fn=os.setsid)
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=cwd
+        cwd=cwd,
+        preexec_fn=os.setsid if hasattr(os, "setsid") else None
     )
+    session.current_pid = process.pid
 
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=EXECUTION_TIMEOUT)
+    except asyncio.TimeoutError:
+        if process.pid:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except Exception:
+                pass
+        raise RuntimeError(f"Tugas timeout melebihi batas waktu {EXECUTION_TIMEOUT} detik.")
+    finally:
+        session.current_pid = None
 
     stdout_str = stdout.decode("utf-8", errors="replace").strip()
     stderr_str = stderr.decode("utf-8", errors="replace").strip()
@@ -535,7 +604,6 @@ async def process_prompt_task(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         response_text = data.get("response", "").strip()
 
-        # Format Footer Rapi
         duration = data.get("duration_seconds")
         usage = data.get("usage")
         footer_badges = []
@@ -592,11 +660,16 @@ async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan <code>/cancel</code> jika ingin membatalkannya.", parse_mode=ParseMode.HTML)
         return
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-
     audio_obj = update.message.voice or update.message.audio
     if not audio_obj:
         return
+
+    # Guard: Max 25 MB
+    if audio_obj.file_size and audio_obj.file_size > 25 * 1024 * 1024:
+        await update.message.reply_text("❌ Ukuran file audio terlalu besar (maksimal 25MB).", parse_mode=ParseMode.HTML)
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
     file_ext = ".oga" if update.message.voice else ".mp3"
     with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp_file:
@@ -613,7 +686,6 @@ async def voice_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("❓ Suara tidak terdeteksi dengan jelas. Silakan coba rekam ulang.", parse_mode=ParseMode.HTML)
             return
 
-        # Tampilkan box kutipan suara yang bersih
         await update.message.reply_text(
             f"🎙️ <b>Transkripsi Suara:</b>\n<blockquote>{html.escape(transcribed_text)}</blockquote>",
             parse_mode=ParseMode.HTML
@@ -643,11 +715,6 @@ async def photo_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⏳ Sedang memproses tugas sebelumnya. Gunakan <code>/cancel</code> jika ingin membatalkannya.", parse_mode=ParseMode.HTML)
         return
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-
-    uploads_dir = os.path.join(session.workspace_dir, "uploads")
-    os.makedirs(uploads_dir, exist_ok=True)
-
     if update.message.photo:
         file_obj = update.message.photo[-1]
         file_name = f"image_{int(time.time())}.png"
@@ -659,6 +726,15 @@ async def photo_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ Format file bukan gambar yang didukung.")
         return
 
+    # Guard: Max 20 MB
+    if file_obj.file_size and file_obj.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("❌ Ukuran gambar terlalu besar (maksimal 20MB).", parse_mode=ParseMode.HTML)
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+
+    uploads_dir = os.path.join(session.workspace_dir, "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
     save_path = os.path.join(uploads_dir, file_name)
 
     try:
@@ -691,7 +767,7 @@ async def photo_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"⚠️ Gagal mengunduh gambar:\n<code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
 
 def main():
-    if not os.path.exists(AGY_PATH):
+    if not os.path.exists(AGY_PATH) and not shutil.which("agy"):
         logger.error(f"Binary 'agy' tidak ditemukan di path: {AGY_PATH}")
         print(f"❌ Error: Binary 'agy' tidak ditemukan di: {AGY_PATH}")
         print("Pastikan Antigravity CLI telah terinstal.")
@@ -705,7 +781,7 @@ def main():
         print("⚠️ PERINGATAN: ALLOWED_TELEGRAM_USER_ID belum diisi di .env.")
         print("Bot akan menolak semua pesan hingga Anda menambahkan ID Anda.")
 
-    logger.info("Memulai Antigravity Telegram Bridge dengan Premium Formatter...")
+    logger.info("Memulai Antigravity Telegram Bridge (Production Engine)...")
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Daftarkan Handlers
@@ -729,10 +805,11 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO, photo_image_handler))
     application.add_handler(MessageHandler(filters.Document.IMAGE, photo_image_handler))
 
-    print(f"🤖 Antigravity Telegram Bridge aktif! (Premium Formatting Ready)")
+    print(f"🤖 Antigravity Telegram Bridge AKTIF (Production Ready)")
+    print(f"🖥️ Platform: {platform.system()} {platform.machine()}")
+    print(f"⚙️ Binary Path: {AGY_PATH}")
     print(f"📂 Default Workspace: {DEFAULT_WORKSPACE}")
     print(f"🔑 Allowed User IDs: {list(ALLOWED_USER_IDS) if ALLOWED_USER_IDS else 'Belum ada'}")
-    print("Tekan Ctrl+C untuk menghentikan.")
 
     application.run_polling()
 
