@@ -3,3 +3,4 @@ python-dotenv>=1.0.0
 SpeechRecognition>=3.14.0
 pydub>=0.25.1
 google-genai>=2.0.0
+psutil>=6.0.0

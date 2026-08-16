@@ -174,27 +174,36 @@ cd antigravity-telegram-bridge
 
 | Perintah | Deskripsi |
 | :--- | :--- |
-| **Kirim Teks** | Mengirimkan tugas coding / instruksi terminal |
-| **Voice Note (VN)** | Merekam suara, otomatis ditranskripsikan ke perintah coding via model Gemini terbaru |
-| **Kirim Foto/Screenshot** | Mengirim gambar desain UI atau error log beserta caption |
-| `/status` | Cek status server, Disk, Uptime, Workspace, dan model aktif |
-| `/workspace <path>` | Berpindah folder kerja proyek secara dinamis |
-| `/new` / `/reset` | Memulai sesi baru (reset konteks memori percakapan) |
-| `/model <nama>` | Ganti model AI (contoh: `/model gemini-3.7-flash`, `/model gemini-2.5-pro`) |
-| `/effort <level>` | Atur tingkat penalaran (`low`, `medium`, `high`, `default`) |
-| `/cancel` | Menghentikan paksa proses yang sedang berlangsung |
-| `/help` | Menampilkan menu bantuan lengkap |
+| **Kirim Teks** | Mengirimkan tugas coding / instruksi terminal / review code |
+| **Voice Note (VN)** | Merekam suara, otomatis ditranskripsikan ke perintah coding via Gemini Multimodal |
+| **Kirim Foto/Screenshot** | Mengirim gambar desain UI atau error log beserta caption untuk dianalisis |
+| `/menu` / `/start` | Membuka **Dashboard Interaktif** lengkap dengan tombol Inline Keyboard |
+| `/status` | Cek status server, RAM Meter, CPU, Disk, Uptime, Workspace, dan model aktif |
+| `/model [nama]` | Buka tombol pemilih model atau ganti langsung (contoh: `/model gemini-3.7-flash`) |
+| `/effort [level]` | Buka tombol pengatur penalaran reasoning (`high`, `medium`, `low`, `default`) |
+| `/workspace [path]` | Berpindah folder kerja proyek secara dinamis atau navigasi via tombol |
+| `/ls [subfolder]` | File & folder browser interaktif di workspace dengan icon & ukuran file |
+| `/git` | Cek branch aktif, commit terakhir, dan status file yang dimodifikasi |
+| `/sh <command>` | Menjalankan perintah shell / terminal cepat langsung di workspace |
+| `/mode [plan\|accept-edits]` | Mengatur mode eksekusi Antigravity agent (planning / auto-accept) |
+| `/whoami` | Menampilkan User ID Telegram, Nama, Username, dan status otorisasi |
+| `/new` / `/reset` | Memulai sesi baru (membersihkan memori percakapan) |
+| `/cancel` | Menghentikan paksa proses yang sedang berlangsung seketika |
+| `/help` | Menampilkan buku panduan perintah lengkap |
 
 ---
 
 ## 📊 Monitoring & Healthcheck Server
 
-Cukup ketik `/status` di chat Telegram Anda dari HP, dan bot akan membalas dengan metrik server terkini:
-* 🖥️ **Host OS & Arsitektur**
+Cukup ketik `/status` di chat Telegram Anda dari HP, dan bot akan membalas dengan metrik visual server:
+* 🖥️ **Host OS & Arsitektur Mesin**
 * ⏱️ **Bot Uptime**
-* 💾 **Kapasitas & Penggunaan Disk Server**
+* 📈 **Real-Time CPU Usage (%)**
+* 🧠 **RAM Server Meter** (Visual Progress Bar `[████░░░░░░]`)
+* 💾 **Kapasitas Disk Storage** (Visual Progress Bar `[███░░░░░░░]`)
 * 📂 **Workspace Aktif**
-* 🧠 **Model & Reasoning Effort**
+* 🧠 **Model Gemini & Reasoning Effort**
+* 💬 **ID Sesi Percakapan Aktif**
 
 ---
 
