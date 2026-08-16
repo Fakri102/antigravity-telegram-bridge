@@ -5,12 +5,12 @@ Menghubungkan Telegram Chat, Voice/Audio, dan Gambar ke Google Antigravity di Ko
 
 Fitur Unggulan:
 - 📱 Modern Telegram UI: Inline Keyboards, Quick Actions, Status Bar, Menu Bar Integration
-- ⚡ Model Selector: Dukungan Gemini 3.7 Flash, Gemini 2.5 Pro, Gemini 2.5 Flash
+- ⚡ Model Selector: Dukungan Gemini 3.7 Flash, Gemini 3.1 Pro, Gemini 3.6 Flash
 - 🧠 Reasoning Effort: High, Medium, Low toggle
 - 🗂️ Interactive File Explorer (/ls) & Git Status (/git)
 - 🖥️ Quick Shell Executor (/sh)
 - 📊 Real-Time Server Healthcheck (CPU, RAM meter, Disk meter, Uptime)
-- 🎙️ Multimodal Voice Transcriber (Gemini 3.7 / 2.5 Audio)
+- 🎙️ Multimodal Voice Transcriber (Gemini 3.7 / 3.6 Audio)
 - 🖼️ Vision & Screenshot Input
 - 🛡️ Process Group Isolation & Fast /cancel
 """
@@ -232,8 +232,8 @@ def build_model_markup(current_model: Optional[str]) -> InlineKeyboardMarkup:
 
     keyboard = [
         [InlineKeyboardButton(f"⚡ {mark('gemini-3.7-flash')} (Terbaru)", callback_data="cb:set_model:gemini-3.7-flash")],
-        [InlineKeyboardButton(f"🔬 {mark('gemini-2.5-pro')}", callback_data="cb:set_model:gemini-2.5-pro")],
-        [InlineKeyboardButton(f"🚀 {mark('gemini-2.5-flash')}", callback_data="cb:set_model:gemini-2.5-flash")],
+        [InlineKeyboardButton(f"🔬 {mark('gemini-3.1-pro')}", callback_data="cb:set_model:gemini-3.1-pro")],
+        [InlineKeyboardButton(f"🚀 {mark('gemini-3.6-flash')}", callback_data="cb:set_model:gemini-3.6-flash")],
         [InlineKeyboardButton("⚙️ Reset ke Default Server", callback_data="cb:set_model:default")],
         [InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="cb:menu_main")]
     ]
@@ -562,7 +562,7 @@ async def transcribe_audio_file(file_path: str) -> str:
             )
 
             # Prioritaskan model Gemini terbaru
-            models_to_try = ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+            models_to_try = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.1-pro", "gemini-2.0-flash"]
             for mod in models_to_try:
                 try:
                     response = client.models.generate_content(
@@ -713,8 +713,8 @@ async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Model Aktif: <code>{curr}</code>\n\n"
             f"<b>Daftar Model yang Didukung:</b>\n"
             f"• ⚡ <code>gemini-3.7-flash</code> — <i>(Rekomendasi) Tercepat, cerdas & reasoning tinggi</i>\n"
-            f"• 🔬 <code>gemini-2.5-pro</code> — <i>Penalaran kompleks, arsitektur & coding mendalam</i>\n"
-            f"• 🚀 <code>gemini-2.5-flash</code> — <i>Ringan & responsif</i>\n\n"
+            f"• 🔬 <code>gemini-3.1-pro</code> — <i>Penalaran kompleks, arsitektur & coding mendalam</i>\n"
+            f"• 🚀 <code>gemini-3.6-flash</code> — <i>Ringan & responsif</i>\n\n"
             f"<i>Pilih model dengan 1 klik pada tombol di bawah:</i>"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=build_model_markup(session.model))
@@ -1051,8 +1051,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Model Aktif: <code>{curr}</code>\n\n"
             f"• ⚡ <code>gemini-3.7-flash</code> — <i>(Rekomendasi) Tercepat & reasoning tinggi</i>\n"
-            f"• 🔬 <code>gemini-2.5-pro</code> — <i>Penalaran kompleks & coding mendalam</i>\n"
-            f"• 🚀 <code>gemini-2.5-flash</code> — <i>Ringan & responsif</i>\n\n"
+            f"• 🔬 <code>gemini-3.1-pro</code> — <i>Penalaran kompleks & coding mendalam</i>\n"
+            f"• 🚀 <code>gemini-3.6-flash</code> — <i>Ringan & responsif</i>\n\n"
             f"<i>Pilih model dengan 1 klik:</i>"
         )
         await query.answer()

@@ -161,7 +161,7 @@ cd antigravity-telegram-bridge
 | :--- | :--- | :--- |
 | `TELEGRAM_BOT_TOKEN` | **Ya** | Token Bot dari [@BotFather](https://t.me/botfather) |
 | `ALLOWED_TELEGRAM_USER_ID` | **Ya** | ID Akun Telegram Anda dari [@userinfobot](https://t.me/userinfobot) |
-| `ANTIGRAVITY_MODEL` | Tidak | Model Gemini default (default: `gemini-3.7-flash`, opsi: `gemini-2.5-pro`, `gemini-2.5-flash`) |
+| `ANTIGRAVITY_MODEL` | Tidak | Model Gemini default (default: `gemini-3.7-flash`, opsi: `gemini-3.1-pro`, `gemini-3.6-flash`) |
 | `ANTIGRAVITY_EFFORT` | Tidak | Reasoning Effort (`high`, `medium`, `low` - default: `high`) |
 | `ANTIGRAVITY_WORKSPACE` | Tidak | Folder kerja awal (misal: `/var/www` atau `/home/user/Code`) |
 | `AGY_BINARY_PATH` | Tidak | Path ke binary `agy` (otomatis dideteksi jika dikosongkan) |
