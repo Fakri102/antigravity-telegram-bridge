@@ -57,6 +57,8 @@ logger = logging.getLogger("AntigravityBridge")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
 DEFAULT_WORKSPACE = os.getenv("ANTIGRAVITY_WORKSPACE", os.path.expanduser("~"))
+DEFAULT_MODEL = os.getenv("ANTIGRAVITY_MODEL", "gemini-3.7-flash").strip()
+DEFAULT_EFFORT = os.getenv("ANTIGRAVITY_EFFORT", "high").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EXECUTION_TIMEOUT = int(os.getenv("ANTIGRAVITY_TIMEOUT", "300"))  # Default 5 menit timeout
 
@@ -102,8 +104,8 @@ class UserSession:
         self.user_id = user_id
         self.conversation_id: Optional[str] = None
         self.workspace_dir: str = DEFAULT_WORKSPACE
-        self.model: Optional[str] = None
-        self.effort: Optional[str] = None  # low, medium, high
+        self.model: Optional[str] = DEFAULT_MODEL if DEFAULT_MODEL else "gemini-3.7-flash"
+        self.effort: Optional[str] = DEFAULT_EFFORT if DEFAULT_EFFORT in ["low", "medium", "high"] else None
         self.current_task: Optional[asyncio.Task] = None
         self.current_pid: Optional[int] = None
 
@@ -304,20 +306,27 @@ async def transcribe_audio_file(file_path: str) -> str:
             prompt_transcribe = (
                 "Transcribe this voice message accurately into text. "
                 "The user is speaking in Indonesian or English about coding, tasks, or development instructions. "
-                "Output ONLY the exact transcribed text."
+                "Output ONLY the exact transcribed text without quotes or preamble."
             )
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-                    prompt_transcribe
-                ]
-            )
-            if response.text and response.text.strip():
-                return response.text.strip()
+            # Prioritaskan model Gemini terbaru
+            models_to_try = ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+            for mod in models_to_try:
+                try:
+                    response = client.models.generate_content(
+                        model=mod,
+                        contents=[
+                            types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                            prompt_transcribe
+                        ]
+                    )
+                    if response.text and response.text.strip():
+                        return response.text.strip()
+                except Exception as model_err:
+                    logger.debug(f"Percobaan transkripsi dengan {mod} gagal: {model_err}")
+                    continue
         except Exception as ge:
-            logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan fallback...")
+            logger.warning(f"Gemini audio transcription error: {ge}. Menggunakan fallback SpeechRecognition...")
 
     wav_path = file_path + ".wav"
     try:
@@ -372,7 +381,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/new</code> atau <code>/reset</code> — Reset sesi percakapan.\n"
         f"• <code>/workspace &lt;path&gt;</code> — Pindah folder proyek aktif.\n"
         f"• <code>/status</code> — Cek status server, RAM, Disk, dan sesi aktif.\n"
-        f"• <code>/model &lt;nama&gt;</code> — Ganti model AI (contoh: <code>/model gemini-2.5-pro</code>).\n"
+        f"• <code>/model &lt;nama&gt;</code> — Ganti model AI (contoh: <code>/model gemini-3.7-flash</code>).\n"
         f"• <code>/effort &lt;low|medium|high&gt;</code> — Atur tingkat penalaran AI.\n"
         f"• <code>/cancel</code> — Batalkan tugas yang sedang berjalan."
     )
@@ -460,21 +469,23 @@ async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = get_session(user_id)
 
     if not context.args:
-        curr = html.escape(session.model or "Default")
+        curr = html.escape(session.model or DEFAULT_MODEL or "gemini-3.7-flash")
         await update.message.reply_text(
-            f"🧠 <b>Model Aktif:</b> <code>{curr}</code>\n\n"
-            f"Contoh ganti model:\n"
-            f"<code>/model gemini-2.5-pro</code>\n"
-            f"<code>/model gemini-2.5-flash</code>\n"
-            f"<code>/model default</code>",
+            f"🧠 <b>Model AI Aktif:</b> <code>{curr}</code>\n\n"
+            f"<b>Pilihan Model Gemini Terbaru:</b>\n"
+            f"• <code>/model gemini-3.7-flash</code> — ⚡ <i>(Rekomendasi) Tercepat, cerdas & reasoning tinggi</i>\n"
+            f"• <code>/model gemini-2.5-pro</code> — 🔬 <i>Penalaran kompleks, arsitektur & coding mendalam</i>\n"
+            f"• <code>/model gemini-2.5-flash</code> — 🚀 <i>Ringan & responsif</i>\n"
+            f"• <code>/model default</code> — <i>Reset ke konfigurasi default (.env)</i>\n\n"
+            f"💡 <i>Tip: Kombinasikan dengan <code>/effort high</code> untuk pemecahan masalah yang lebih teliti.</i>",
             parse_mode=ParseMode.HTML
         )
         return
 
     model_arg = context.args[0].strip()
     if model_arg.lower() in ["default", "reset"]:
-        session.model = None
-        await update.message.reply_text("✅ Model dikembalikan ke konfigurasi default Server.", parse_mode=ParseMode.HTML)
+        session.model = DEFAULT_MODEL if DEFAULT_MODEL else "gemini-3.7-flash"
+        await update.message.reply_text(f"✅ Model dikembalikan ke default: <code>{html.escape(session.model)}</code>", parse_mode=ParseMode.HTML)
     else:
         session.model = model_arg
         await update.message.reply_text(f"✅ Model disetel ke: <code>{html.escape(session.model)}</code>", parse_mode=ParseMode.HTML)

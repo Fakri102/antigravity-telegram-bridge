@@ -129,6 +129,9 @@ def run_interactive_setup(force: bool = False) -> bool:
         gemini_val = gemini_input
 
     # Simpan ke .env
+    default_model_val = existing.get("ANTIGRAVITY_MODEL", "gemini-3.7-flash")
+    default_effort_val = existing.get("ANTIGRAVITY_EFFORT", "high")
+
     env_content = f"""# ==========================================
 # ANTIGRAVITY TELEGRAM BRIDGE CONFIGURATION
 # Dibuat otomatis oleh Setup Wizard
@@ -142,6 +145,12 @@ ALLOWED_TELEGRAM_USER_ID={user_id_val}
 
 # Direktori default saat bot dijalankan
 ANTIGRAVITY_WORKSPACE={workspace_val}
+
+# Model AI Gemini terbaru untuk Antigravity (Default: gemini-3.7-flash)
+ANTIGRAVITY_MODEL={default_model_val}
+
+# Reasoning Effort: low, medium, high (Default: high)
+ANTIGRAVITY_EFFORT={default_effort_val}
 
 # Path ke binary agy CLI (kosongkan untuk deteksi otomatis)
 AGY_BINARY_PATH={existing.get('AGY_BINARY_PATH', '')}

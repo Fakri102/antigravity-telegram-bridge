@@ -161,6 +161,8 @@ cd antigravity-telegram-bridge
 | :--- | :--- | :--- |
 | `TELEGRAM_BOT_TOKEN` | **Ya** | Token Bot dari [@BotFather](https://t.me/botfather) |
 | `ALLOWED_TELEGRAM_USER_ID` | **Ya** | ID Akun Telegram Anda dari [@userinfobot](https://t.me/userinfobot) |
+| `ANTIGRAVITY_MODEL` | Tidak | Model Gemini default (default: `gemini-3.7-flash`, opsi: `gemini-2.5-pro`, `gemini-2.5-flash`) |
+| `ANTIGRAVITY_EFFORT` | Tidak | Reasoning Effort (`high`, `medium`, `low` - default: `high`) |
 | `ANTIGRAVITY_WORKSPACE` | Tidak | Folder kerja awal (misal: `/var/www` atau `/home/user/Code`) |
 | `AGY_BINARY_PATH` | Tidak | Path ke binary `agy` (otomatis dideteksi jika dikosongkan) |
 | `ANTIGRAVITY_TIMEOUT` | Tidak | Batas waktu tunggu eksekusi dalam detik (default: `300`) |
@@ -173,12 +175,12 @@ cd antigravity-telegram-bridge
 | Perintah | Deskripsi |
 | :--- | :--- |
 | **Kirim Teks** | Mengirimkan tugas coding / instruksi terminal |
-| **Voice Note (VN)** | Merekam suara, otomatis ditranskripsikan ke perintah coding |
+| **Voice Note (VN)** | Merekam suara, otomatis ditranskripsikan ke perintah coding via model Gemini terbaru |
 | **Kirim Foto/Screenshot** | Mengirim gambar desain UI atau error log beserta caption |
-| `/status` | Cek status server, Disk, Uptime, Workspace, dan model |
+| `/status` | Cek status server, Disk, Uptime, Workspace, dan model aktif |
 | `/workspace <path>` | Berpindah folder kerja proyek secara dinamis |
 | `/new` / `/reset` | Memulai sesi baru (reset konteks memori percakapan) |
-| `/model <nama>` | Ganti model AI (contoh: `/model gemini-2.5-pro` atau `/model default`) |
+| `/model <nama>` | Ganti model AI (contoh: `/model gemini-3.7-flash`, `/model gemini-2.5-pro`) |
 | `/effort <level>` | Atur tingkat penalaran (`low`, `medium`, `high`, `default`) |
 | `/cancel` | Menghentikan paksa proses yang sedang berlangsung |
 | `/help` | Menampilkan menu bantuan lengkap |
